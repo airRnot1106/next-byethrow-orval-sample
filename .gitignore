@@ -45,3 +45,7 @@ next-env.d.ts
 
 # pre-commit
 .pre-commit-config.yaml
+
+# Default TypeSpec output
+tsp-output/
+dist/
