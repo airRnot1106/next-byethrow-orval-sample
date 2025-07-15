@@ -23,53 +23,73 @@ if (
 }
 
 // Get all exported arrow functions that return Promise<T>
-const variableStatements = file
+const functions = file
   .getVariableStatements()
-  .filter((stmt) => stmt.hasExportKeyword());
+  .filter((stmt) => stmt.hasExportKeyword())
+  .flatMap((stmt) =>
+    stmt.getDeclarations().filter((decl) => {
+      const init = decl.getInitializer();
+      if (!init || init.getKind() !== SyntaxKind.ArrowFunction) return false;
 
-const functions = variableStatements.flatMap((stmt) =>
-  stmt.getDeclarations().filter((decl) => {
-    const initializer = decl.getInitializer();
-    if (!initializer) return false;
+      const arrowFunc = init.asKindOrThrow(SyntaxKind.ArrowFunction);
+      if (!arrowFunc.isAsync()) return false;
 
-    // Check if it's an arrow function
-    if (initializer.getKind() !== SyntaxKind.ArrowFunction) return false;
+      const returnTypeNode = arrowFunc.getReturnTypeNode();
+      if (!returnTypeNode) return false;
 
-    const arrowFunc = initializer.asKindOrThrow(SyntaxKind.ArrowFunction);
-    const returnType = arrowFunc.getReturnTypeNode();
-    if (!returnType) return false;
+      // Check if return type is Promise<T> using AST
+      if (returnTypeNode.getKind() !== SyntaxKind.TypeReference) return false;
 
-    const returnTypeText = returnType.getText();
-    return returnTypeText.startsWith('Promise<');
-  }),
-);
+      const typeRef = returnTypeNode.asKind(SyntaxKind.TypeReference);
+      if (!typeRef) return false;
+
+      const typeName = typeRef.getTypeName();
+      if (typeName.getKind() !== SyntaxKind.Identifier) return false;
+
+      const identifier = typeName.asKind(SyntaxKind.Identifier);
+      if (!identifier || identifier.getText() !== 'Promise') return false;
+
+      const typeArgs = typeRef.getTypeArguments();
+      return typeArgs.length === 1;
+    }),
+  );
 
 console.log(`Found ${functions.length} functions to modify`);
 
 // Process each function
 functions.forEach((decl) => {
-  const initializer = decl.getInitializer();
-  if (!initializer) return;
+  const arrowFunc = decl
+    .getInitializerOrThrow()
+    .asKindOrThrow(SyntaxKind.ArrowFunction);
+  const returnTypeNode = arrowFunc.getReturnTypeNodeOrThrow();
 
-  const arrowFunc = initializer.asKindOrThrow(SyntaxKind.ArrowFunction);
-  const returnTypeNode = arrowFunc.getReturnTypeNode();
-  if (!returnTypeNode) return;
+  // Ensure it's a TypeReference (Promise<T>)
+  if (returnTypeNode.getKind() !== SyntaxKind.TypeReference) return;
 
-  const returnTypeText = returnTypeNode.getText();
+  const typeRef = returnTypeNode.asKind(SyntaxKind.TypeReference);
+  if (!typeRef) return;
 
-  // Extract the type parameter from Promise<T>
-  const match = returnTypeText.match(/^Promise<(.+)>$/);
-  if (!match) return;
+  const typeArgs = typeRef.getTypeArguments();
+  if (typeArgs.length !== 1) return;
 
-  const typeParam = match[1];
-  const newReturnType = `Result.ResultAsync<${typeParam}, Error>`;
+  const typeParam = typeArgs[0];
+  if (!typeParam) return;
+
+  const typeParamText = typeParam.getText();
 
   console.log(
-    `Replacing ${returnTypeText} with ${newReturnType} in function ${decl.getName()}`,
+    `Replacing Promise<${typeParamText}> with Result.ResultAsync<${typeParamText}, Error> in function ${decl.getName()}`,
   );
 
-  // Replace the return type
-  returnTypeNode.replaceWithText(newReturnType);
+  // Create new type reference node using AST
+  const newTypeRef = project
+    .createWriter()
+    .write('Result.ResultAsync<')
+    .write(typeParamText)
+    .write(', Error>')
+    .toString();
+
+  returnTypeNode.replaceWithText(newTypeRef);
 });
 
 await project.save();
