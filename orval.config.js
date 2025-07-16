@@ -13,13 +13,8 @@ module.exports = {
         mutator: {
           path: './src/lib/custom-fetch.ts',
           name: 'customFetch',
-          type: {
-            name: 'WrappedResult',
-            path: './src/lib/custom-fetch.ts',
-          },
         },
         fetch: {
-          // includeHttpResponseReturnType: true,
           includeHttpResponseReturnType: false,
         },
       },
